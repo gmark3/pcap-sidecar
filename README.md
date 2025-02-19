@@ -80,7 +80,7 @@ The pcap sidecar has images that are compatible with both [Cloud Run execution e
   - `us-central1-docker.pkg.dev/pcap-sidecar/pcap-sidecar/pcap-sidecar:newest`
   - `us-central1-docker.pkg.dev/pcap-sidecar/pcap-sidecar/pcap-sidecar:v#.#.#-gen2`
 
-## How to deploy tcpdump sidecar to Cloud Run
+## How to deploy pcap sidecar to Cloud Run
 
 1. Define environment variables to be used during Cloud Run service deployment:
 
@@ -157,7 +157,7 @@ The `tcpdump` sidecar accepts the following environment variables:
 
   > For **Cloud Run gen1** the value of this environment variable will always be `any`.
 
-- `PCAP_GCS_BUCKET`: (STRING, **required**) the name of the Cloud Storage Bucket to be mounted and used to store **PCAP files**. 
+- `PCAP_GCS_BUCKET`: (STRING, **required**) the name of the Cloud Storage Bucket to be mounted and used to store **PCAP files**. Ensure that you provide the runtime service account the `roles/storage.admin` so that it may create objects and read bucket metadata.
 
 - `PCAP_L3_PROTOS`: (STRING, _optional_) comma separated list of network layer protocols; default value is `ipv4,ipv6`.
 
@@ -329,7 +329,7 @@ More advanced use cases may benefit from scheduling `tcpdump` executions. Use th
    ```
 
 > [!TIP]
-> If you prefer to let Cloud Build perform all the tasks, go directly to build using [Cloud Build](#using-cloud-build) or [a Cloud Build trigger](#using-a-cloud-build-trigger)
+> If you prefer to let Cloud Build perform all the tasks, go directly to build [using Cloud Build](#using-cloud-build)
 
 3. Move into the repository local directory: `cd cloud-run-tcpdump`.
 
@@ -368,25 +368,6 @@ This approach assumes that Artifact Registry is available in `PROJECT_ID`.
    ```
 
 > See the full list of available flags for `gcloud builds submit`: https://cloud.google.com/sdk/gcloud/reference/builds/submit
-
-### Using a Cloud Build trigger
-
-We will create our own [forked repository](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks/fork-a-repo) of the project on Github in order to create a Cloud Build Trigger that will build our container automatically.
-
-1. Fork the [cloud-run-tcpdump](https://github.com/gchux/cloud-run-tcpdump) project using your Github account.
-
-2. Use your Github account to connect [a Github repository using Cloud Build](https://cloud.google.com/build/docs/automating-builds/github/connect-repo-github).
-
-3. Create a new (or use an existing) [Artifact Registry repository](https://cloud.google.com/artifact-registry/docs/repositories) for storing the container images.
-
-4. Create a [Cloud Build trigger from Github](https://cloud.google.com/build/docs/automating-builds/github/build-repos-from-github).  Use the values from the prior step to populate the following "Substitution variables". Other values can be left to the defaults.
-
-   ```
-   _REPO_LOCATION # Artifact Registry Docker repository location e.g. us-central1
-   _REPO_NAME     # Artifact Registry Docker repository name
-   _IMAGE_NAME    # The output container image name; i/e: `pcap-sidecar`
-   ``` 
-5. [Manually trigger](https://cloud.google.com/build/docs/automating-builds/create-manage-triggers#testing_a_build_trigger) your initial build to create your first container.
 
 # Using with App Engine Flexible
 
