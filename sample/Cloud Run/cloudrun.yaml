@@ -1,0 +1,47 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: hello-world-with-sidecar
+  annotations:
+    run.googleapis.com/client-name: cloud-console
+spec:
+  template:
+    spec:
+      containers:
+      - image: gcr.io/google-samples/hello-app:1.0
+        ports:
+        - containerPort: 8080
+      - image: us-central1-docker.pkg.dev/pcap-sidecar/pcap-sidecar/pcap-sidecar:latest
+        name: sidecar
+        ports:
+        - containerPort: 12345
+        startupProbe:
+          tcpSocket:
+            port: 12345
+          periodSeconds: 10
+          failureThreshold: 3
+          successThreshold: 1
+          initialDelaySeconds: 15
+        env:
+        - name: PCAP_IFACE
+          value: "${PCAP_IFACE}"
+        - name: PCAP_GCS_BUCKET
+          value: "${PCAP_GCS_BUCKET}"
+        - name: PCAP_FILTER
+          value: "${PCAP_FILTER}"
+        - name: PCAP_JSON_LOG
+          value: "${PCAP_JSON_LOG}"
+      containerConcurrency: 80
+      timeoutSeconds: 300
+  traffic:
+  - latestRevision: true
+    percent: 100
+  annotations:
+    run.googleapis.com/ingress: all
+    run.googleapis.com/ingress-allow-all: "true"
+    run.googleapis.com/launch-stage: BETA
+    run.googleapis.com/client-name: cloud-console
+    run.googleapis.com/cpu-throttling: "true"
+    run.googleapis.com/vpc-access-egress: all
+    run.googleapis.com/vpc-access-connector: "" #Fill in if you are using a VPC connector.
+    run.googleapis.com/service-account: "${SERVICE_ACCOUNT}" #Use the bash variable
