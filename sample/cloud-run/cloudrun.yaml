@@ -1,47 +1,43 @@
 apiVersion: serving.knative.dev/v1
 kind: Service
 metadata:
-  name: hello-world-with-sidecar
+  name: PLACEHOLDER_SERVICE_NAME
   annotations:
-    run.googleapis.com/client-name: cloud-console
+    run.googleapis.com/ingress: all
+    run.googleapis.com/ingress-status: all
 spec:
   template:
+    metadata:
+      annotations:
+        run.googleapis.com/execution-environment: gen2
+        run.googleapis.com/startup-cpu-boost: 'true'
+        run.googleapis.com/client-name: gcloud
     spec:
       containers:
       - image: gcr.io/google-samples/hello-app:1.0
+        name: app
         ports:
-        - containerPort: 8080
+        - name: http1
+          containerPort: 8080
+        startupProbe:
+          failureThreshold: 1
+          periodSeconds: 240
+          tcpSocket:
+            port: 8080
+          timeoutSeconds: 240
       - image: us-central1-docker.pkg.dev/pcap-sidecar/pcap-sidecar/pcap-sidecar:latest
-        name: sidecar
-        ports:
-        - containerPort: 12345
+        name: pcap-sidecar
+        env:
+        - name: PCAP_IFACE
+          value: any
+        - name: PCAP_GCS_BUCKET
+          value: "PLACEHOLDER_PCAP_GCS_BUCKET"
+        - name: PCAP_FILTER
+        - name: PCAP_JSON_LOG
+          value: 'true'
         startupProbe:
           tcpSocket:
             port: 12345
-          periodSeconds: 10
+          timeoutSeconds: 3
+          periodSeconds: 5
           failureThreshold: 3
-          successThreshold: 1
-          initialDelaySeconds: 15
-        env:
-        - name: PCAP_IFACE
-          value: "${PCAP_IFACE}"
-        - name: PCAP_GCS_BUCKET
-          value: "${PCAP_GCS_BUCKET}"
-        - name: PCAP_FILTER
-          value: "${PCAP_FILTER}"
-        - name: PCAP_JSON_LOG
-          value: "${PCAP_JSON_LOG}"
-      containerConcurrency: 80
-      timeoutSeconds: 300
-  traffic:
-  - latestRevision: true
-    percent: 100
-  annotations:
-    run.googleapis.com/ingress: all
-    run.googleapis.com/ingress-allow-all: "true"
-    run.googleapis.com/launch-stage: BETA
-    run.googleapis.com/client-name: cloud-console
-    run.googleapis.com/cpu-throttling: "true"
-    run.googleapis.com/vpc-access-egress: all
-    run.googleapis.com/vpc-access-connector: "" #Fill in if you are using a VPC connector.
-    run.googleapis.com/service-account: "${SERVICE_ACCOUNT}" #Use the bash variable
