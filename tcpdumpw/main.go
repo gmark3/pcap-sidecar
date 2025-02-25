@@ -25,6 +25,7 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -35,14 +36,14 @@ import (
 	// _ "net/http/pprof"
 	_ "time/tzdata"
 
+	"github.com/GoogleCloudPlatform/pcap-sidecar/pcap-cli/pkg/pcap"
 	"github.com/alphadose/haxmap"
-	"github.com/gchux/pcap-cli/pkg/pcap"
 	"github.com/go-co-op/gocron/v2"
 	"github.com/gofrs/flock"
 	"github.com/google/uuid"
 	"github.com/wissance/stringFormatter"
 
-	pcapFilter "github.com/gchux/cloud-run-tcpdump/tcpdumpw/pkg/filter"
+	pcapFilter "github.com/GoogleCloudPlatform/pcap-sidecar/tcpdumpw/pkg/filter"
 )
 
 func UNUSED(x ...interface{}) {}
@@ -64,7 +65,7 @@ var (
 	gcp_gae    = flag.Bool("gae", false, "enable GAE Flex environment configuration")
 	pcap_iface = flag.String("iface", "", "prefix to scan for network interfaces to capture from")
 	hc_port    = flag.Uint("hc_port", 12345, "TCP port for health checking")
-	filter     = flag.String("filter", "", "BPF filter to be used for capturing packets")
+	filter     = flag.String("filter", pcap.PcapDefaultFilter, "BPF filter to be used for capturing packets")
 	l3_protos  = flag.String("l3_protos", "ipv4,ipv6", "FQDNs to be translated into IPs to apply as packet filter")
 	l4_protos  = flag.String("l4_protos", "tcp,udp", "FQDNs to be translated into IPs to apply as packet filter")
 	hosts      = flag.String("hosts", "", "FQDNs to be translated into IPs to apply as packet filter")
@@ -72,6 +73,9 @@ var (
 	ipv4       = flag.String("ipv4", "", "IPv4s or CIDR to be applied to the packet filter")
 	ipv6       = flag.String("ipv6", "", "IPv6s or CIDR to be applied to the packet filter")
 	tcp_flags  = flag.String("tcp_flags", "", "TCP flags to be set for a segment to be captured")
+	ephemerals = flag.String("ephemerals", "32768,65535", "range of ephemeral ports")
+	compat     = flag.Bool("compat", false, "apply filters in Cloud Run gen1 mode")
+	rt_env     = flag.String("rt_env", "cloud_run_gen2", "runtime where PCAP sidecar is used")
 )
 
 type (
@@ -128,6 +132,8 @@ var (
 	errGaeDisabled      = errors.New("GAE JSON log disabled")
 )
 
+var gaeJSONInterval = 0 // disable time based file rotation
+
 const (
 	INFO  jLogLevel = "INFO"
 	ERROR jLogLevel = "ERROR"
@@ -135,14 +141,18 @@ const (
 )
 
 const (
-	fileNamePattern   = "%d_%s__%%Y%%m%%dT%%H%%M%%S"
-	runFileOutput     = `%s/part__` + fileNamePattern
-	gaeFileOutput     = `/var/log/app_engine/app/app_pcap__` + fileNamePattern
-	pcapLockFile      = "/var/lock/pcap.lock"
-	defaultPcapFilter = "(tcp or udp) and (ip or ip6)"
+	fileNamePattern      = "%d_%s__%%Y%%m%%dT%%H%%M%%S"
+	runFileOutput        = `%s/part__` + fileNamePattern
+	gaeFileOutput        = `/var/log/app_engine/app/app_pcap__` + fileNamePattern
+	pcapLockFile         = "/var/lock/pcap.lock"
+	defaultPcapFilter    = "(tcp or udp or icmp or icmp6) and (ip or ip6)"
+	devicesRegexTemplate = "^(?:(?:lo$)|(?:(?:ipvlan-)?%s\\d+.*$))"
 )
 
-var gaeJSONInterval = 0 // disable time based file rotation
+const (
+	anyIfaceName  string = "any"
+	anyIfaceIndex int    = int(0)
+)
 
 func jlog(severity jLogLevel, job *tcpdumpJob, message string) {
 	now := time.Now()
@@ -287,22 +297,27 @@ func tcpdump(timeout time.Duration) error {
 func newPcapConfig(
 	iface, format, output, extension, filter string,
 	filters []pcap.PcapFilterProvider,
+	compatFilters pcap.PcapFilters,
 	snaplen, interval int,
-	ordered, conntrack bool,
+	compat, ordered, conntrack bool,
+	ephemerals *pcap.PcapEmphemeralPorts,
 ) *pcap.PcapConfig {
 	return &pcap.PcapConfig{
-		Promisc:   true,
-		Iface:     iface,
-		Snaplen:   snaplen,
-		TsType:    "",
-		Format:    format,
-		Output:    output,
-		Extension: extension,
-		Filter:    filter,
-		Interval:  interval,
-		Ordered:   ordered,
-		ConnTrack: conntrack,
-		Filters:   filters,
+		Compat:        compat,
+		Promisc:       true,
+		Iface:         iface,
+		Snaplen:       snaplen,
+		TsType:        "",
+		Format:        format,
+		Output:        output,
+		Extension:     extension,
+		Filter:        filter,
+		Interval:      interval,
+		Ordered:       ordered,
+		ConnTrack:     conntrack,
+		Filters:       filters,
+		CompatFilters: compatFilters,
+		Ephemerals:    ephemerals,
 	}
 }
 
@@ -310,8 +325,10 @@ func createTasks(
 	ctx context.Context,
 	ifacePrefix, timezone, directory, extension, filter *string,
 	filters []pcap.PcapFilterProvider,
+	compatFilters pcap.PcapFilters,
 	snaplen, interval *int,
-	tcpdump, jsondump, jsonlog, ordered, conntrack, gcpGAE *bool,
+	compat, tcpdump, jsondump, jsonlog, ordered, conntrack, gcpGAE *bool,
+	ephemerals *pcap.PcapEmphemeralPorts,
 ) []*pcapTask {
 	tasks := []*pcapTask{}
 
@@ -323,8 +340,20 @@ func createTasks(
 	isGAE, err := strconv.ParseBool(gaeEnvVar)
 	isGAE = (err == nil && isGAE) || *gcpGAE
 
-	ifaceRegexp := regexp.MustCompile(fmt.Sprintf("^(?:(?:lo$)|(?:(?:ipvlan-)?%s\\d+.*$))", iface))
-	devices, _ := pcap.FindDevicesByRegex(ifaceRegexp)
+	var devices []*pcap.PcapDevice = nil
+	if strings.EqualFold(iface, anyIfaceName) {
+		devices = []*pcap.PcapDevice{
+			{
+				NetInterface: &net.Interface{
+					Name:  anyIfaceName,
+					Index: anyIfaceIndex,
+				},
+			},
+		}
+	} else {
+		ifaceRegexp := regexp.MustCompile(fmt.Sprintf(devicesRegexTemplate, iface))
+		devices, _ = pcap.FindDevicesByRegex(ifaceRegexp)
+	}
 
 	for _, device := range devices {
 
@@ -336,8 +365,8 @@ func createTasks(
 
 		output := fmt.Sprintf(runFileOutput, *directory, netIface.Index, netIface.Name)
 
-		tcpdumpCfg := newPcapConfig(iface, "pcap", output, *extension, *filter, filters, *snaplen, *interval, *ordered, *conntrack)
-		jsondumpCfg := newPcapConfig(iface, "json", output, "json", *filter, filters, *snaplen, *interval, *ordered, *conntrack)
+		tcpdumpCfg := newPcapConfig(iface, "pcap", output, *extension, *filter, filters, compatFilters, *snaplen, *interval, *compat, *ordered, *conntrack, ephemerals)
+		jsondumpCfg := newPcapConfig(iface, "json", output, "json", *filter, filters, compatFilters, *snaplen, *interval, *compat, *ordered, *conntrack, ephemerals)
 
 		// premature optimization is the root of all evil
 		var engineErr, writerErr error = nil, nil
@@ -482,6 +511,7 @@ func waitDone(job *tcpdumpJob, pcapMutex *flock.Flock, exitSignal *string) {
 func appendFilter(
 	ctx context.Context,
 	filters []pcap.PcapFilterProvider,
+	compatFilters pcap.PcapFilters,
 	rawFilter *string,
 	factory pcapFilter.PcapFilterProviderFactory,
 ) []pcap.PcapFilterProvider {
@@ -496,11 +526,44 @@ func appendFilter(
 		}
 	}
 
-	filter := factory(rawFilter)
+	filter := factory(rawFilter, compatFilters)
 	filters = append(filters, filter)
 	jlog(INFO, &emptyTcpdumpJob, stringFormatter.Format("using filter: {0}", filter.String()))
 
 	return filters
+}
+
+func parseEphemeralPorts(ephemerals *string) *pcap.PcapEmphemeralPorts {
+	// default ephemeral ports range
+	ephemeralPortRange := &pcap.PcapEmphemeralPorts{
+		Min: pcap.PCAP_MIN_EPHEMERAL_PORT,
+		Max: pcap.PCAP_MAX_EPHEMERAL_PORT,
+	}
+
+	if *ephemerals == "" {
+		return ephemeralPortRange
+	}
+
+	ephemeralPorts := strings.SplitN(*ephemerals, ",", 2)
+
+	if len(ephemeralPorts) != 2 {
+		return ephemeralPortRange
+	}
+
+	for i, valueStr := range ephemeralPorts {
+		if value, err := strconv.ParseUint(valueStr, 10, 16); err != nil && value >= 0x0400 && value <= 0xFFFF {
+			// see: https://datatracker.ietf.org/doc/html/rfc6056#page-5
+			// a valid `ephemeral port` must be within RFC 6056 range: [1024/0x4000,65535/0xFFFF]
+			port := uint16(value)
+			if i == 0 && port < ephemeralPortRange.Max {
+				ephemeralPortRange.Min = uint16(value)
+			} else if port > ephemeralPortRange.Min {
+				ephemeralPortRange.Max = uint16(value)
+			}
+		}
+	}
+
+	return ephemeralPortRange
 }
 
 func main() {
@@ -510,37 +573,48 @@ func main() {
 	defer func() {
 		if r := recover(); r != nil {
 			jlog(FATAL, &emptyTcpdumpJob, stringFormatter.Format("panic: {0}", r))
+			fmt.Fprintln(os.Stderr, string(debug.Stack()))
 		}
 	}()
 
 	jid.Store(uuid.Nil)
 	xid.Store(uuid.Nil)
 
-	if strings.EqualFold(*filter, "DISABLED") {
+	if *compat || strings.EqualFold(*filter, "DISABLED") {
 		*filter = ""
+	} else {
+		*filter = strings.TrimSpace(*filter)
 	}
 
+	compatFilters := pcap.NewPcapFilters()
 	filters := []pcap.PcapFilterProvider{}
-	if *filter == "" {
-		// if complex filter is empty, build it using 'Simple PCAP filters'
-		filters = appendFilter(ctx, filters, l3_protos, pcapFilter.NewL3ProtoFilterProvider)
-		filters = appendFilter(ctx, filters, l4_protos, pcapFilter.NewL4ProtoFilterProvider)
-		filters = appendFilter(ctx, filters, ports, pcapFilter.NewPortsFilterProvider)
-		filters = appendFilter(ctx, filters, tcp_flags, pcapFilter.NewTCPFlagsFilterProvider)
 
-		ipFilterProvider := pcapFilter.NewIPFilterProvider(ipv4, ipv6, hosts)
-		if ipFilter, ok := ipFilterProvider.Get(ctx); ok {
-			jlog(INFO, &emptyTcpdumpJob, stringFormatter.Format("using filter: {0}", *ipFilter))
+	if *compat || *filter == "" {
+		// if complex filter is empty, build it using 'Simple PCAP filters'
+		filters = appendFilter(ctx, filters, compatFilters, l3_protos, pcapFilter.NewL3ProtoFilterProvider)
+		filters = appendFilter(ctx, filters, compatFilters, l4_protos, pcapFilter.NewL4ProtoFilterProvider)
+		filters = appendFilter(ctx, filters, compatFilters, ports, pcapFilter.NewPortsFilterProvider)
+		filters = appendFilter(ctx, filters, compatFilters, tcp_flags, pcapFilter.NewTCPFlagsFilterProvider)
+
+		ipFilterProvider := pcapFilter.NewIPFilterProvider(ipv4, ipv6, hosts, compatFilters)
+		if _, ok := ipFilterProvider.Get(ctx); ok {
+			jlog(INFO, &emptyTcpdumpJob, stringFormatter.Format("using filter: {0}", ipFilterProvider.String()))
 			filters = append(filters, ipFilterProvider)
 		}
 
-		if len(filters) == 0 { // if no simple filters are available, use a default 'catch-all' filter
-			*filter = string(defaultPcapFilter)
+		if len(filters) == 0 && !*compat {
+			// if no simple filters are available:
+			//   - use a default 'catch-all' filter
+			//   		- but only if compat mode is disabled
+			*filter = string(pcap.PcapDefaultFilter)
 		}
 	}
 
+	ephemeralPortRange := parseEphemeralPorts(ephemerals)
+
 	tasks := createTasks(ctx, pcap_iface, timezone, directory, extension,
-		filter, filters, snaplen, interval, tcp_dump, json_dump, json_log, ordered, conntrack, gcp_gae)
+		filter, filters, compatFilters, snaplen, interval, compat, tcp_dump,
+		json_dump, json_log, ordered, conntrack, gcp_gae, ephemeralPortRange)
 
 	if len(tasks) == 0 {
 		jlog(FATAL, &emptyTcpdumpJob, "no PCAP tasks available")

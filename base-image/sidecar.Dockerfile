@@ -22,14 +22,14 @@ FROM pcap-base:libpcap-v${LIBPCAP_VERSION}_tcpdump-v${TCPDUMP_VERSION} AS base
 FROM --platform=linux/amd64 ubuntu:22.04
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG GCSFUSE_VERSION='2.1.0'
+ARG GCSFUSE_VERSION='2.7.0'
 
 WORKDIR /app
 
 USER 0:0
 
 RUN apt-get -qq update  > /dev/null \
-    && apt-get -qq -y install tzdata curl jq fuse > /dev/null \
+    && apt-get -qq -y install ca-certificates tzdata curl jq fuse > /dev/null \
     && apt-get -qq clean > /dev/null
 
 COPY --from=base /dist/bin/ /usr/bin/

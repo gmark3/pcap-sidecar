@@ -18,21 +18,24 @@ import (
 	"context"
 	"strings"
 
+	"github.com/GoogleCloudPlatform/pcap-sidecar/pcap-cli/pkg/pcap"
 	mapset "github.com/deckarep/golang-set/v2"
-	"github.com/gchux/pcap-cli/pkg/pcap"
 	"github.com/wissance/stringFormatter"
 )
 
 type (
 	L4ProtoFilterProvider struct {
 		*pcap.PcapFilter
+		pcap.PcapFilters
 	}
 )
 
 const (
-	l4_PROTO_DEFAULT_FILTER string = "tcp or udp"
+	l4_PROTO_DEFAULT_FILTER string = "tcp or udp or icmp or icmp6"
 	l4_PROTO_TCP_FILTER     string = "tcp"
 	l4_PROTO_UDP_FILTER     string = "udp"
+	l4_PROTO_ICMPv4_FILTER  string = "icmp"
+	l4_PROTO_ICMPv6_FILTER  string = "icmp6"
 )
 
 func (p *L4ProtoFilterProvider) Get(ctx context.Context) (*string, bool) {
@@ -58,8 +61,16 @@ func (p *L4ProtoFilterProvider) Get(ctx context.Context) (*string, bool) {
 		switch proto {
 		case "tcp", "6", "0x06":
 			l4Protos.Add(string(l4_PROTO_TCP_FILTER))
+			p.AddL4Proto(pcap.L4_PROTO_TCP)
 		case "udp", "17", "0x11":
 			l4Protos.Add(string(l4_PROTO_UDP_FILTER))
+			p.AddL4Proto(pcap.L4_PROTO_UDP)
+		case "icmp", "icmp4", "1", "0x01":
+			l4Protos.Add(string(l4_PROTO_ICMPv4_FILTER))
+			p.AddL4Proto(pcap.L4_PROTO_ICMP)
+		case "icmp6", "58", "0x3A":
+			l4Protos.Add(string(l4_PROTO_ICMPv6_FILTER))
+			p.AddL4Proto(pcap.L4_PROTO_ICMP6)
 		}
 	}
 
@@ -87,9 +98,13 @@ func (p *L4ProtoFilterProvider) Apply(
 	return applyFilter(ctx, srcFilter, p, mode)
 }
 
-func newL4ProtoFilterProvider(filter *pcap.PcapFilter) pcap.PcapFilterProvider {
+func newL4ProtoFilterProvider(
+	filter *pcap.PcapFilter,
+	compatFilters pcap.PcapFilters,
+) pcap.PcapFilterProvider {
 	provider := &L4ProtoFilterProvider{
-		PcapFilter: filter,
+		PcapFilter:  filter,
+		PcapFilters: compatFilters,
 	}
 	return provider
 }

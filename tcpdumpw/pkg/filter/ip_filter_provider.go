@@ -19,8 +19,8 @@ import (
 	"net/netip"
 	"strings"
 
+	"github.com/GoogleCloudPlatform/pcap-sidecar/pcap-cli/pkg/pcap"
 	mapset "github.com/deckarep/golang-set/v2"
-	"github.com/gchux/pcap-cli/pkg/pcap"
 	"github.com/wissance/stringFormatter"
 )
 
@@ -29,12 +29,22 @@ type (
 		ipv4Filter        *pcap.PcapFilter
 		ipv6Filter        *pcap.PcapFilter
 		dnsFilterProvider *DNSFilterProvider
+		compatFilters     pcap.PcapFilters
 	}
 )
 
-const DEFAULT_IP_FILTER = "net 0.0.0.0/0 or net ::/0"
+const (
+	defaultIPv4Net  = "0.0.0.0/0"
+	defaultIPv6Net  = "::/0"
+	defaultIPfilter = "net " + defaultIPv4Net + " or net " + defaultIPv6Net
+)
 
-func (p *IPFilterProvider) getIPsAndNETs(_ context.Context) ([]string, []string) {
+func (p *IPFilterProvider) getIPsAndNETs(
+	_ context.Context,
+) (
+	[]string, /* IPs */
+	[]string, /* NETs */
+) {
 	if *p.ipv4Filter.Raw == "" && *p.ipv6Filter.Raw == "" {
 		return []string{}, []string{}
 	}
@@ -47,22 +57,30 @@ func (p *IPFilterProvider) getIPsAndNETs(_ context.Context) ([]string, []string)
 	NETs := []string{}
 
 	for _, IPorNET := range allIPsOrNETs {
-		if IPorNET == "" {
+		if IPorNET == "" || strings.EqualFold(IPorNET, "DISABLED") {
 			continue
 		} else if strings.EqualFold(IPorNET, "ALL") || strings.EqualFold(IPorNET, "ANY") {
-			NETs = append(NETs, "0.0.0.0/0")
-			NETs = append(NETs, "::/0")
+			NETs = append(NETs, defaultIPv4Net)
+			NETs = append(NETs, defaultIPv6Net)
 		} else if addr, err := netip.ParseAddr(IPorNET); err == nil {
 			if addr.Is4() || addr.Is6() {
 				IPs = append(IPs, addr.String())
 			}
 		} else if net, err := netip.ParsePrefix(IPorNET); err == nil {
-			if net.IsValid() {
-				NETs = append(NETs, net.String())
+			if !net.IsValid() {
+				continue
+			}
+			NETs = append(NETs, net.String())
+			addr := net.Addr()
+			if addr.Is4() {
+				p.compatFilters.AddIPv4Ranges(IPorNET)
+			} else {
+				p.compatFilters.AddIPv6Ranges(IPorNET)
 			}
 		}
 	}
 
+	// ALL returned IPs and Networks are SAFE
 	return IPs, NETs
 }
 
@@ -75,7 +93,7 @@ func (p *IPFilterProvider) Get(ctx context.Context) (*string, bool) {
 
 	IPs, NETs := p.getIPsAndNETs(ctx)
 	ipSet := mapset.NewThreadUnsafeSet(IPs...)
-	if IPs := p.dnsFilterProvider.hostsToIPs(ctx); !IPs.IsEmpty() {
+	if IPs, ok := p.dnsFilterProvider.hostsToIPs(ctx); ok && !IPs.IsEmpty() {
 		ipSet.Append(IPs.ToSlice()...)
 	}
 
@@ -90,6 +108,10 @@ func (p *IPFilterProvider) Get(ctx context.Context) (*string, bool) {
 				// if any NET already contains this IP,
 				// then keep the NET and drop the IP.
 				ipSet.Remove(ip)
+			} else if IP.Is4() {
+				p.compatFilters.AddIPv4s(ip)
+			} else if IP.Is6() {
+				p.compatFilters.AddIPv6s(ip)
 			}
 			return false
 		})
@@ -116,7 +138,7 @@ func (p *IPFilterProvider) Get(ctx context.Context) (*string, bool) {
 	} else if netFilter != "" {
 		filter = netFilter
 	} else {
-		filter = string(DEFAULT_IP_FILTER)
+		filter = string(defaultIPfilter)
 	}
 
 	return &filter, true
@@ -140,11 +162,13 @@ func (p *IPFilterProvider) Apply(
 
 func newIPFilterProvider(
 	ipv4RawFilter, ipv6RawFilter, dnsRawFiler *string,
+	compatFilters pcap.PcapFilters,
 ) pcap.PcapFilterProvider {
 	provider := &IPFilterProvider{
 		ipv4Filter:        &pcap.PcapFilter{Raw: ipv4RawFilter},
 		ipv6Filter:        &pcap.PcapFilter{Raw: ipv6RawFilter},
-		dnsFilterProvider: newDNSFilterProviderFromRawFilter(dnsRawFiler).(*DNSFilterProvider),
+		dnsFilterProvider: newDNSFilterProviderFromRawFilter(dnsRawFiler, compatFilters).(*DNSFilterProvider),
+		compatFilters:     compatFilters,
 	}
 	return provider
 }

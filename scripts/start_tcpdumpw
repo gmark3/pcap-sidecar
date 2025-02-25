@@ -1,18 +1,36 @@
 #!/usr/bin/env bash
 
+set +x
+
 while : ; do
     pcapfsn_ready=$(ps -efa | grep --color=never '/pcap_fsn' | grep --color=never -v grep | wc -l  | tr -d '\n')
-    [[ "${pcapfsn_ready}" == '1' ]] && break
-    echo "{\"severity\":\"WARNING\",\"message\":\"PCAP FS notifier is not running\",\"sidecar\":\"${APP_SIDECAR}\",\"module\":\"${PROC_NAME}\"}"
+    [[ "${pcapfsn_ready}" == '1' ]] \
+        && echo "{\"severity\":\"INFO\",\"message\":\"PCAP FS notifier is running\",\"sidecar\":\"${APP_SIDECAR}\",\"module\":\"${PROC_NAME}\"}" \
+        && break
+    echo "{\"severity\":\"WARNING\",\"message\":\"Waiting for PCAP FS notifier to run ...\",\"sidecar\":\"${APP_SIDECAR}\",\"module\":\"${PROC_NAME}\"}"
     sleep 1
 done
+
+EPHEMERAL_PORT_RANGE=`cat /proc/sys/net/ipv4/ip_local_port_range | tr '\t' ' ' | tr -s ' ' | tr ' ' ',' | tr -d '\n'`
+
+export PCAP_IFACE_SAFE="${PCAP_IFACE:-eth}"
+if [[ "${PCAP_RT_ENV}" == "cloud_run_gen1" ]]; then
+    # make execution safe for Cloud Run gen1
+    unset PCAP_IFACE_SAFE
+    export PCAP_IFACE_SAFE='any'
+    unset PCAP_COMPAT
+    export PCAP_COMPAT='true'
+fi
+
+ls -l /bin/tcpdump
+ls -l /bin/tcpdumpw
 
 set -x
 
 # `exec` allows `/bin/tcpdumpw` to receive signals directly
 exec env /bin/tcpdumpw \
     -gae=${PCAP_GAE} \
-    -iface="${PCAP_IFACE:-eth}" \
+    -iface="${PCAP_IFACE_SAFE}" \
     -use_cron=${PCAP_USE_CRON:-false} \
     -cron_exp="${PCAP_CRON_EXP:--}" \
     -timezone="${PCAP_TZ:-UTC}" \
@@ -25,13 +43,16 @@ exec env /bin/tcpdumpw \
     -jsonlog=${PCAP_JSONDUMP_LOG:-false} \
     -ordered=${PCAP_ORDERED:-false} \
     -conntrack=${PCAP_CONNTRACK:-false} \
-    -snaplen=${PCAP_SNAPLEN:-0} \
+    -snaplen=${PCAP_SNAPLEN:-65536} \
     -hc_port="${PCAP_HC_PORT:-12345}" \
-    -filter="${PCAP_FILTER:=DISABLED}" \
+    -filter="${PCAP_FILTER:-DISABLED}" \
     -l3_protos="${PCAP_L3_PROTOS:-ipv4,ipv6}" \
     -l4_protos="${PCAP_L4_PROTOS:-tcp,udp}" \
     -ipv4="${PCAP_IPV4:-ALL}" \
     -ipv6="${PCAP_IPV6:-ALL}" \
     -hosts="${PCAP_HOSTS:-ALL}" \
     -ports="${PCAP_PORTS:-ALL}" \
-    -tcp_flags="${PCAP_TCP_FLAGS:-ANY}"
+    -tcp_flags="${PCAP_TCP_FLAGS:-ANY}" \
+    -ephemerals="${EPHEMERAL_PORT_RANGE:-32768,65535}" \
+    -rt_env="${PCAP_RT_ENV:-cloud_run_gen2}" \
+    -compat="${PCAP_COMPAT:-false}"

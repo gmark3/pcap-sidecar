@@ -17,13 +17,13 @@ package filter
 import (
 	"context"
 
-	"github.com/gchux/pcap-cli/pkg/pcap"
+	"github.com/GoogleCloudPlatform/pcap-sidecar/pcap-cli/pkg/pcap"
 	"github.com/wissance/stringFormatter"
 )
 
 type (
-	pcapFilterProviderFactory = func(*pcap.PcapFilter) pcap.PcapFilterProvider
-	PcapFilterProviderFactory = func(*string) pcap.PcapFilterProvider
+	pcapFilterProviderFactory = func(*pcap.PcapFilter, pcap.PcapFilters) pcap.PcapFilterProvider
+	PcapFilterProviderFactory = func(*string, pcap.PcapFilters) pcap.PcapFilterProvider
 )
 
 func applyFilter(
@@ -32,8 +32,12 @@ func applyFilter(
 	provider pcap.PcapFilterProvider,
 	mode pcap.PcapFilterMode,
 ) *string {
+	if provider == nil {
+		return srcFilter
+	}
+
 	filter, ok := provider.Get(ctx)
-	if !ok || *filter == "" {
+	if !ok || filter == nil || *filter == "" {
 		return srcFilter
 	}
 
@@ -48,6 +52,7 @@ func applyFilter(
 	case pcap.PCAP_FILTER_MODE_OR:
 		*filter = stringFormatter.Format("{0} or ({1})", *srcFilter, *filter)
 	}
+
 	return filter
 }
 
@@ -59,32 +64,36 @@ func newPcapFilter(rawFilter *string) *pcap.PcapFilter {
 
 func newPcapFilterProvider(
 	rawFilter *string,
+	compatFilters pcap.PcapFilters,
 	factory pcapFilterProviderFactory,
 ) pcap.PcapFilterProvider {
 	pcapFilter := newPcapFilter(rawFilter)
-	return factory(pcapFilter)
+	return factory(pcapFilter, compatFilters)
 }
 
-func NewIPFilterProvider(ipv4RawFilter, ipv6RawFilter, dnsRawFilter *string) pcap.PcapFilterProvider {
-	return newIPFilterProvider(ipv4RawFilter, ipv6RawFilter, dnsRawFilter)
+func NewIPFilterProvider(
+	ipv4RawFilter, ipv6RawFilter, dnsRawFilter *string,
+	compatFilters pcap.PcapFilters,
+) pcap.PcapFilterProvider {
+	return newIPFilterProvider(ipv4RawFilter, ipv6RawFilter, dnsRawFilter, compatFilters)
 }
 
-func NewDNSFilterProvider(rawFilter *string) pcap.PcapFilterProvider {
-	return newPcapFilterProvider(rawFilter, newDNSFilterProvider)
+func NewDNSFilterProvider(rawFilter *string, compatFilters pcap.PcapFilters) pcap.PcapFilterProvider {
+	return newPcapFilterProvider(rawFilter, compatFilters, newDNSFilterProvider)
 }
 
-func NewL3ProtoFilterProvider(rawFilter *string) pcap.PcapFilterProvider {
-	return newPcapFilterProvider(rawFilter, newL3ProtoFilterProvider)
+func NewL3ProtoFilterProvider(rawFilter *string, compatFilters pcap.PcapFilters) pcap.PcapFilterProvider {
+	return newPcapFilterProvider(rawFilter, compatFilters, newL3ProtoFilterProvider)
 }
 
-func NewL4ProtoFilterProvider(rawFilter *string) pcap.PcapFilterProvider {
-	return newPcapFilterProvider(rawFilter, newL4ProtoFilterProvider)
+func NewL4ProtoFilterProvider(rawFilter *string, compatFilters pcap.PcapFilters) pcap.PcapFilterProvider {
+	return newPcapFilterProvider(rawFilter, compatFilters, newL4ProtoFilterProvider)
 }
 
-func NewPortsFilterProvider(rawFilter *string) pcap.PcapFilterProvider {
-	return newPcapFilterProvider(rawFilter, newPortsFilterProvider)
+func NewPortsFilterProvider(rawFilter *string, compatFilters pcap.PcapFilters) pcap.PcapFilterProvider {
+	return newPcapFilterProvider(rawFilter, compatFilters, newPortsFilterProvider)
 }
 
-func NewTCPFlagsFilterProvider(rawFilter *string) pcap.PcapFilterProvider {
-	return newPcapFilterProvider(rawFilter, newTCPFlagsFilterProvider)
+func NewTCPFlagsFilterProvider(rawFilter *string, compatFilters pcap.PcapFilters) pcap.PcapFilterProvider {
+	return newPcapFilterProvider(rawFilter, compatFilters, newTCPFlagsFilterProvider)
 }

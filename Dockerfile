@@ -17,6 +17,8 @@ ARG TCPDUMP_VERSION='4.99.5'
 
 FROM --platform=linux/amd64 pcap-sidecar:libpcap-v${LIBPCAP_VERSION}_tcpdump-v${TCPDUMP_VERSION}
 
+ARG PCAP_RT_ENV='cloud_run_gen2'
+
 LABEL org.opencontainers.image.description="Cloud Run PCAP sidecar"
 
 USER 0:0
@@ -24,6 +26,7 @@ USER 0:0
 COPY ./bin /bin
 COPY ./scripts /scripts
 COPY ./tcpdump.conf /tcpdump.conf
-COPY ./scripts/init /init
+
+RUN sed -i -e "s/@PCAP_RT_ENV@/${PCAP_RT_ENV}/g" /scripts/init && cp -vf /scripts/init /init
 
 ENTRYPOINT ["/init"]

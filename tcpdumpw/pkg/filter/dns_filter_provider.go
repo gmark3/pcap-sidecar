@@ -20,40 +20,41 @@ import (
 	"net/netip"
 	"strings"
 
+	"github.com/GoogleCloudPlatform/pcap-sidecar/pcap-cli/pkg/pcap"
 	mapset "github.com/deckarep/golang-set/v2"
-	"github.com/gchux/pcap-cli/pkg/pcap"
 	"github.com/wissance/stringFormatter"
 )
 
 type (
 	DNSFilterProvider struct {
 		*pcap.PcapFilter
-		resolver *net.Resolver
+		resolver      *net.Resolver
+		compatFilters pcap.PcapFilters
 	}
 )
 
-func (p *DNSFilterProvider) hostToIPs(ctx context.Context, host *string) []string {
+func (p *DNSFilterProvider) hostToIPs(ctx context.Context, host *string) ([]string, bool) {
 	if *host == "" {
-		return []string{}
+		return nil, false
 	}
 
 	addrs, err := p.resolver.LookupHost(ctx, *host)
 	if err != nil {
-		return []string{}
+		return nil, false
 	}
-	return addrs
+	return addrs, true
 }
 
-func (p *DNSFilterProvider) hostsToIPs(ctx context.Context) mapset.Set[string] {
+func (p *DNSFilterProvider) hostsToIPs(ctx context.Context) (mapset.Set[string], bool) {
 	if *p.Raw == "" ||
 		strings.EqualFold(*p.Raw, "ALL") ||
 		strings.EqualFold(*p.Raw, "ANY") {
-		return nil
+		return nil, false
 	}
 
 	hosts := strings.Split(*p.Raw, ",")
 	if len(hosts) == 0 || (len(hosts) == 1 && hosts[0] == "") {
-		return nil
+		return nil, false
 	}
 
 	ipSet := mapset.NewThreadUnsafeSet[string]()
@@ -63,18 +64,26 @@ func (p *DNSFilterProvider) hostsToIPs(ctx context.Context) mapset.Set[string] {
 			strings.EqualFold(host, "ANY") {
 			continue
 		}
-		for _, IP := range p.hostToIPs(ctx, &host) {
-			if addr, err := netip.ParseAddr(IP); err == nil {
-				ipSet.Add(addr.String())
+
+		if IPs, ok := p.hostToIPs(ctx, &host); ok {
+			for _, IP := range IPs {
+				if addr, err := netip.ParseAddr(IP); err == nil {
+					ipSet.Add(addr.String())
+					if addr.Is4() {
+						p.compatFilters.AddIPv4s(IP)
+					} else {
+						p.compatFilters.AddIPv6s(IP)
+					}
+				}
 			}
 		}
 	}
 
-	return ipSet
+	return ipSet, true
 }
 
 func (p *DNSFilterProvider) Get(ctx context.Context) (*string, bool) {
-	if ipSet := p.hostsToIPs(ctx); ipSet != nil && !ipSet.IsEmpty() {
+	if ipSet, ok := p.hostsToIPs(ctx); ok && ipSet != nil && !ipSet.IsEmpty() {
 		filter := stringFormatter.Format("host {0}", strings.Join(ipSet.ToSlice(), " or host "))
 		return &filter, true
 	}
@@ -96,15 +105,22 @@ func (p *DNSFilterProvider) Apply(
 	return applyFilter(ctx, srcFilter, p, mode)
 }
 
-func newDNSFilterProvider(filter *pcap.PcapFilter) pcap.PcapFilterProvider {
+func newDNSFilterProvider(
+	filter *pcap.PcapFilter,
+	compatFilters pcap.PcapFilters,
+) pcap.PcapFilterProvider {
 	return &DNSFilterProvider{
 		PcapFilter: filter,
 		resolver: &net.Resolver{
 			PreferGo: true,
 		},
+		compatFilters: compatFilters,
 	}
 }
 
-func newDNSFilterProviderFromRawFilter(rawFilter *string) pcap.PcapFilterProvider {
-	return newDNSFilterProvider(&pcap.PcapFilter{Raw: rawFilter})
+func newDNSFilterProviderFromRawFilter(
+	rawFilter *string,
+	compatFilters pcap.PcapFilters,
+) pcap.PcapFilterProvider {
+	return newDNSFilterProvider(&pcap.PcapFilter{Raw: rawFilter}, compatFilters)
 }

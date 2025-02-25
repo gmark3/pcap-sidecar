@@ -1,0 +1,37 @@
+# Copyright 2024 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+version: "3"
+
+dotenv: [".env"]
+
+tasks:
+  docker-build:
+    vars:
+      RUNTIME_ENVIRONMENT: '{{default "cloud_run_gen1" .ENV}}'
+    dotenv:
+      - "{{.USER_WORKING_DIR}}/.env"
+      - "{{.USER_WORKING_DIR}}/../env/{{.RUNTIME_ENVIRONMENT}}.env"
+    cmds:
+      - >-
+        docker buildx build
+        --progress=plain
+        --platform=linux/amd64
+        --no-cache --file=Dockerfile
+        --build-arg="GOLANG_VERSION=$GOLANG_VERSION"
+        --build-arg="GIT_VERSION=$GIT_VERSION"
+        --build-arg="PATCH_VERSION=$PATCH_VERSION"
+        --build-arg="GCSFUSE_VERSION=$GCSFUSE_VERSION"
+        --output={{.USER_WORKING_DIR}}/bin
+        --target=releaser {{.USER_WORKING_DIR}}

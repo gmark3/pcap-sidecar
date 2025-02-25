@@ -1,9 +1,16 @@
 bin/
 tmp/
+local_only
+local-only
 .task/
+
+Taskfile.local.yaml
+.env.local
 
 Dockerfile.profile
 docker_build_profile
+
+./tcpdumpw/pcap-cli/
 
 ### Go ###
 # If you prefer the allow list template instead of the deny list, see community template:

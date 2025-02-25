@@ -18,27 +18,27 @@ import (
 	"context"
 	"strings"
 
+	"github.com/GoogleCloudPlatform/pcap-sidecar/pcap-cli/pkg/pcap"
 	mapset "github.com/deckarep/golang-set/v2"
-	"github.com/gchux/pcap-cli/pkg/pcap"
 	"github.com/wissance/stringFormatter"
 )
 
 type (
 	L3ProtoFilterProvider struct {
 		*pcap.PcapFilter
+		pcap.PcapFilters
 	}
 )
 
 const (
-	l3_PROTO_DEFAULT_FILTER string = "ip or ip6"
+	l3_PROTO_DEFAULT_FILTER string = "ip or ip6 or arp"
 	l3_PROTO_IPv4_FILTER    string = "ip"
 	l3_PROTO_IPv6_FILTER    string = "ip6"
+	l3_PROTO_ARP_FILTER     string = "arp"
 )
 
 func (p *L3ProtoFilterProvider) Get(ctx context.Context) (*string, bool) {
 	if *p.Raw == "" ||
-		*p.Raw == "45" || // IPv4(4) + IPv6(41)
-		*p.Raw == "0x2D" || // IPv4(0x04) + IPv6(0x29)
 		strings.EqualFold(*p.Raw, "ALL") ||
 		strings.EqualFold(*p.Raw, "ANY") ||
 		strings.EqualFold(*p.Raw, l3_PROTO_DEFAULT_FILTER) {
@@ -58,8 +58,12 @@ func (p *L3ProtoFilterProvider) Get(ctx context.Context) (*string, bool) {
 		switch proto {
 		case "ip", "ip4", "ipv4", "4", "0x04":
 			l3Protos.Add(string(l3_PROTO_IPv4_FILTER))
+			p.AddL3Proto(pcap.L3_PROTO_IPv4)
 		case "ip6", "ipv6", "41", "0x29":
 			l3Protos.Add(string(l3_PROTO_IPv6_FILTER))
+			p.AddL3Proto(pcap.L3_PROTO_IPv6)
+		case "arp", "0x0806":
+			l3Protos.Add(string(l3_PROTO_ARP_FILTER))
 		}
 	}
 
@@ -87,9 +91,13 @@ func (p *L3ProtoFilterProvider) Apply(
 	return applyFilter(ctx, srcFilter, p, mode)
 }
 
-func newL3ProtoFilterProvider(filter *pcap.PcapFilter) pcap.PcapFilterProvider {
+func newL3ProtoFilterProvider(
+	filter *pcap.PcapFilter,
+	compatFilters pcap.PcapFilters,
+) pcap.PcapFilterProvider {
 	provider := &L3ProtoFilterProvider{
-		PcapFilter: filter,
+		PcapFilter:  filter,
+		PcapFilters: compatFilters,
 	}
 	return provider
 }

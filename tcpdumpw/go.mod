@@ -1,13 +1,12 @@
-module github.com/gchux/cloud-run-tcpdump/tcpdumpw
+module github.com/GoogleCloudPlatform/pcap-sidecar/tcpdumpw
 
 go 1.22.4
 
-// replace github.com/gchux/pcap-cli v1.0.0-rc126 => ../pcap-cli
+require github.com/GoogleCloudPlatform/pcap-sidecar/pcap-cli v0.0.0
 
 require (
 	github.com/alphadose/haxmap v1.4.0
 	github.com/deckarep/golang-set/v2 v2.6.0
-	github.com/gchux/pcap-cli v1.0.0-rc126
 	github.com/go-co-op/gocron/v2 v2.5.0
 	github.com/gofrs/flock v0.12.1
 	github.com/google/uuid v1.6.0
@@ -22,6 +21,7 @@ require (
 	github.com/Jeffail/gabs/v2 v2.7.0 // indirect
 	github.com/containerd/console v1.0.3 // indirect
 	github.com/easyCZ/logrotate v0.3.0 // indirect
+	github.com/google/btree v1.1.3 // indirect
 	github.com/google/gopacket v1.1.19 // indirect
 	github.com/gookit/color v1.5.4 // indirect
 	github.com/itchyny/timefmt-go v0.1.6 // indirect
@@ -41,10 +41,12 @@ require (
 	github.com/zhangyunhao116/skipmap v0.10.1 // indirect
 	golang.org/x/crypto v0.31.0 // indirect
 	golang.org/x/exp v0.0.0-20240416160154-fe59bbe5cc7f // indirect
-	golang.org/x/net v0.33.0 // indirect
+  golang.org/x/net v0.33.0 // indirect
 	golang.org/x/sync v0.10.0 // indirect
 	golang.org/x/sys v0.28.0 // indirect
 	golang.org/x/term v0.27.0 // indirect
 	golang.org/x/text v0.21.0 // indirect
 	google.golang.org/protobuf v1.34.2 // indirect
 )
+
+replace github.com/GoogleCloudPlatform/pcap-sidecar/pcap-cli => ../pcap-cli
