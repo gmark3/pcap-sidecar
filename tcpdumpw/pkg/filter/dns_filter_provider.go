@@ -20,8 +20,8 @@ import (
 	"net/netip"
 	"strings"
 
+	"github.com/GoogleCloudPlatform/pcap-sidecar/pcap-cli/pkg/pcap"
 	mapset "github.com/deckarep/golang-set/v2"
-	"github.com/gchux/pcap-cli/pkg/pcap"
 	"github.com/wissance/stringFormatter"
 )
 
@@ -122,5 +122,8 @@ func newDNSFilterProviderFromRawFilter(
 	rawFilter *string,
 	compatFilters pcap.PcapFilters,
 ) pcap.PcapFilterProvider {
-	return newDNSFilterProvider(&pcap.PcapFilter{Raw: rawFilter}, compatFilters)
+	return newDNSFilterProvider(
+		&pcap.PcapFilter{
+			Raw: rawFilter,
+		}, compatFilters)
 }

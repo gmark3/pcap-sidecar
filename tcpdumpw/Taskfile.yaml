@@ -40,9 +40,10 @@ tasks:
         --output={{.USER_WORKING_DIR}}/bin
         --target=releaser {{.USER_WORKING_DIR}}
     sources:
-      - ./main.go
-      - ./go.mod
-      - ./go.sum
+      - go.mod
+      - go.sum
+      - main.go
+      - pkk/**/*.go
 
   go-fmt:
     cmds:
@@ -58,7 +59,7 @@ tasks:
       - task: update-gitmodules
       - task: go-fmt
       - task: go-gen
-      - go mod tidy -compat=1.22.4
+      - go mod tidy -compat=$GOLANG_VERSION
       - >-
         go build
         -tags json
@@ -66,9 +67,10 @@ tasks:
         {{if .VERBOSE}}-v -a{{end}}
         main.go
     sources:
-      - ./main.go
-      - ./go.mod
-      - ./go.sum
+      - go.mod
+      - go.sum
+      - main.go
+      - pkk/**/*.go
 
   local-dist:
     cmds:

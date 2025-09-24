@@ -13,17 +13,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+ARG GOLANG_VERSION='1.24.0'
 
-FROM --platform=linux/amd64 golang:1.22.4-bookworm AS builder
+FROM --platform=linux/amd64 golang:${GOLANG_VERSION}-bookworm AS builder
+
+ARG GOLANG_VERSION='1.24.0'
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG BIN_NAME=pcap_fsn
+ARG BIN_NAME=pcapfsn
 
 WORKDIR /app
 
-COPY ./go.mod go.mod
-COPY ./go.sum go.sum
-COPY ./main.go main.go
+COPY ./pcap-fsnotify/go.mod go.mod
+COPY ./pcap-fsnotify/go.sum go.sum
+COPY ./pcap-fsnotify/main.go main.go
+COPY ./pcap-fsnotify/internal/ internal/
 
 RUN go install mvdan.cc/gofumpt@latest
 
@@ -32,7 +36,7 @@ ENV GOOS=linux
 ENV GOARCH=amd64
 
 RUN gofumpt -l -w ./main.go
-RUN go mod tidy -compat=1.22.4
+RUN go mod tidy -compat="${GOLANG_VERSION}"
 RUN go mod download
 RUN go build -v -o /app/bin/${BIN_NAME}
 
